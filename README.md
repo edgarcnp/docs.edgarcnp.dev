@@ -108,7 +108,7 @@ allowance was for its avatar and nothing in this tree loads it.
   here; a deploy that lacks a scope fails naming the permission it wanted.
 - **The `edgarcnp.dev` zone in that account**, and **`docs.edgarcnp.dev` free**: a custom domain cannot
   be attached to two Workers or to a Pages project at once.
-- **A `v*` tag on a commit of `main`** that matches `package.json`'s `version` (`v0.1.0` today). The
+- **A `v*` tag on a commit of `main`** that matches `package.json`'s `version` (`v1.0.0` today). The
   deploy job refuses anything else.
 - Nothing else: no buckets, no KV, no bindings, no build-time secrets. The document is fetched over the
   public internet at build time.
