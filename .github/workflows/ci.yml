@@ -1,0 +1,52 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    # Reusable: deploy.yml calls this workflow before any tag deploy, so the same gate runs on the
+    # exact commit being released.
+    workflow_call:
+
+permissions:
+    contents: read
+
+jobs:
+    # One job on purpose: the build and the checks it feeds are the same tree, so a second job would
+    # render it again to prove the same commit. The two installs it needs are composite actions under
+    # `.github/actions/`, so each toolchain pin has one home.
+    site:
+        name: Build the site and run its checks
+        runs-on: ubuntu-latest
+        # A newer push to the same pull request supersedes the run it replaces, so the older job is
+        # cancelled; a run on `main` and the run a tag deploy waits on never are, because the deploy
+        # reads their result.
+        concurrency:
+            group: ci-${{ github.ref }}
+            cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            - name: Install the pinned Node
+              uses: ./.github/actions/setup-node
+
+            - name: Install Bun and the locked dependencies
+              uses: ./.github/actions/setup-js
+
+            - name: Build the site
+              # Renders from the live document — `GET https://api.edgarcnp.dev/docs` is the whole
+              # contract — so a build that cannot read it fails here rather than deploying a page
+              # generated from yesterday's document.
+              run: bun run build
+
+            - name: Check the site
+              # Determinism, the policy and its style hash, the subresources, the 404, the absolute
+              # metadata and the caching split, all against the rendered tree. The half that needs
+              # the deployed host is `bun run live-check`, which runs after a deploy.
+              run: bun run check
+
+            - name: Check the deployment configuration
+              # `--dry-run` builds the project and runs Cloudflare's own checks without uploading and
+              # without a credential, so a configuration change cannot rot between releases.
+              run: node_modules/.bin/cf deploy --dry-run

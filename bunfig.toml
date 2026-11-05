@@ -1,0 +1,17 @@
+# Bun is this repository's package manager. It installs the two tools the site needs —
+# Sourcey, which renders the page, and the Cloudflare CLI that deploys it — and drives
+# every command through `package.json`'s scripts. Both tools run on Node: the executable
+# `bun install` writes into `node_modules/.bin` carries a `#!/usr/bin/env node` shebang,
+# which `bun run` honours rather than replaces. The README states the requirement.
+
+[install]
+# Every dependency is an exact pin: `package.json` carries `3.9.2`, never `^3.9.2`, and
+# Renovate replaces any range it finds with the resolved exact version. `bun add`
+# defaults to a caret range, so the policy is enforced here rather than remembered per
+# command.
+exact = true
+
+# This project opts out of Bun's supply-chain cooldown (`minimumReleaseAge`, in
+# seconds): exact pins plus Renovate are the update control here, and the owner takes
+# upstream releases as soon as they land rather than maintaining per-package exceptions.
+minimumReleaseAge = 0

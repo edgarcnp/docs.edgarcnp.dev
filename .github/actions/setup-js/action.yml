@@ -1,0 +1,20 @@
+name: Setup JavaScript
+description: >-
+    Install Bun at the version `package.json`'s `packageManager` names, then the locked
+    dependencies: Sourcey, which renders the reference page, and the Cloudflare CLI that deploys it.
+
+runs:
+    using: composite
+    steps:
+        - name: Setup Bun
+          # The package manager. No `bun-version`: setup-bun reads `package.json` "packageManager",
+          # so the pin lives in one place and Renovate keeps it current.
+          uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+          with:
+              bun-version-file: package.json
+
+        - name: Install dependencies
+          shell: bash
+          # `--frozen-lockfile` makes a lockfile that disagrees with `package.json` a failure
+          # instead of a silent rewrite. What it installs is the two tools above.
+          run: bun install --frozen-lockfile

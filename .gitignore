@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# The build's output. `dist/` is what the deploy uploads, `.build/` is the staging
+# directory the build renders into and the scratch directories `bun run check` uses.
+# Neither is committed: both are generated from the document `GET /docs` serves.
+/dist/
+/.build/
+
+# The document the generator reads, written by the build from `GET /docs`. It is
+# generated rather than authored, so a committed copy would be a second source of truth
+# for the page's content.
+/public/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Wrangler's local state
+.wrangler/
+.cloudflare/

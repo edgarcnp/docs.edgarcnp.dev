@@ -1,0 +1,55 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":disableDependencyDashboard"],
+    "abandonmentThreshold": "1 year",
+    "addLabels": ["renovate", "dependencies"],
+    "assignAutomerge": true,
+    "automerge": false,
+    "customManagers": [
+        {
+            "customType": "regex",
+            "description": "The Node pin is the runtime the generator and the deploy CLI run on, and it lives in the `setup-node` composite action, so Renovate reads it out of that YAML.",
+            "managerFilePatterns": ["/^\\.github/actions/setup-node/action\\.yml$/"],
+            "matchStrings": ["node-version: '(?<currentValue>[^']+)'"],
+            "depNameTemplate": "node",
+            "datasourceTemplate": "node-version"
+        }
+    ],
+    "keepUpdatedLabel": "renovate-keep-updated",
+    "lockFileMaintenance": {
+        "enabled": false
+    },
+    "osvVulnerabilityAlerts": true,
+    "pruneBranchAfterAutomerge": true,
+    "reviewers": ["edgarcnp"],
+    "rollbackPrs": true,
+    "schedule": ["* * * * *"],
+    "vulnerabilityAlerts": {
+        "groupName": null,
+        "schedule": [],
+        "dependencyDashboardApproval": false,
+        "minimumReleaseAge": null,
+        "rangeStrategy": "bump",
+        "commitMessageSuffix": "[SECURITY]",
+        "branchTopic": "{{{datasource}}}-{{{depNameSanitized}}}-vulnerability",
+        "prCreation": "immediate",
+        "vulnerabilityFixStrategy": "lowest"
+    },
+    "packageRules": [
+        {
+            "description": "Direct dependencies are exact pins (`bunfig.toml` makes `bun add` write them too); Renovate replaces any range it finds with the resolved exact version, so the policy cannot drift. Sourcey is the generator the page is rendered by, so a bump is a page that changes: it lands as its own PR.",
+            "matchDepTypes": ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"],
+            "rangeStrategy": "pin"
+        },
+        {
+            "description": "Bun is the package manager: its pin is the one line of package.json \"packageManager\" that setup-bun reads in CI, so every bump lands in a single PR.",
+            "matchPackageNames": ["bun"],
+            "groupName": "bun"
+        },
+        {
+            "description": "The Node pin governs the runtime the generator and `cf` run on (`.github/actions/setup-node`), so it moves on its own release line.",
+            "matchPackageNames": ["node"],
+            "groupName": "node"
+        }
+    ]
+}

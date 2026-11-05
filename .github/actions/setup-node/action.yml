@@ -1,0 +1,22 @@
+name: Setup Node
+description: >-
+    Install the Node.js the build and the deployment run on. `node_modules/.bin/sourcey` is
+    `#!/usr/bin/env node`, and `bun run` honours that shebang rather than replacing it, so the
+    generator executes on Node even though Bun is the package manager that installed it. The
+    Cloudflare CLI starts the same way and names the same majors. A host with Bun but no Node
+    fails the build, which is the bug this pin exists for.
+
+runs:
+    using: composite
+    steps:
+        - name: Setup Node
+          # The pin is this one line, and `renovate.json`'s custom manager reads it here, so a bump
+          # is one PR against one file. The exact version and not a range: the page is rendered by
+          # the Node this names, on the workstation and in CI alike.
+          uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+          with:
+              node-version: '26.13.0'
+              # The lockfile belongs to Bun and `setup-js` owns the install, so there is no npm
+              # cache to key. Off explicitly rather than by the action's default, which would start
+              # caching the day `packageManager` named npm.
+              package-manager-cache: false

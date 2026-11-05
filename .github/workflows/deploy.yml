@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: read
+
+concurrency:
+    # Tags pushed close together must deploy in order, and every waiting tag must survive: the
+    # default single queue cancels the middle of three, so `queue: max` keeps them all (it cannot
+    # combine with cancel-in-progress, which stays false).
+    group: deploy
+    cancel-in-progress: false
+    queue: max
+
+jobs:
+    verify:
+        name: Verify the site
+        # The CI workflow — build, the acceptance checks, the dry-run deploy — must pass on the tagged
+        # commit before anything is uploaded.
+        uses: ./.github/workflows/ci.yml
+
+    deploy:
+        name: Deploy the Worker
+        needs: verify
+        runs-on: ubuntu-latest
+        steps:
+            # The two refusals come first, ahead of the toolchain installs: a tag that names no
+            # deployable commit costs seconds, not a Node download.
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  # Full history: the ancestry gate below needs the merge base between the tagged
+                  # commit and main, not just the tag.
+                  fetch-depth: 0
+
+            - name: Require the tagged commit to be on main
+              # A tag on an unmerged branch commit passes the reusable CI gate; without this, its
+              # push would deploy. Refuse anything that is not an ancestor of the default branch.
+              run: |
+                  if ! git rev-parse --verify origin/main >/dev/null 2>&1; then
+                      echo "::error::origin/main is not available in this checkout; cannot verify the tag ancestry."
+                      exit 1
+                  fi
+                  if ! git merge-base --is-ancestor HEAD origin/main; then
+                      echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not an ancestor of origin/main; refusing to deploy."
+                      exit 1
+                  fi
+
+            - name: Require the tag to match the package version
+              # Any `v*` tag on a main commit passes the CI gate; only the version package.json names
+              # may deploy. The runner image ships a Node of its own, which is why this reads the
+              # manifest before the pinned one is installed.
+              run: |
+                  expected="v$(node -p "require('./package.json').version")"
+                  if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+                      echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${expected}; refusing to deploy."
+                      exit 1
+                  fi
+
+            - name: Install the pinned Node
+              uses: ./.github/actions/setup-node
+
+            - name: Install Bun and the locked dependencies
+              uses: ./.github/actions/setup-js
+
+            - name: Build and deploy
+              # `bun run deploy` renders the tree from the document the API answers with now, then
+              # hands the directory to `cf deploy`. A Worker with no entrypoint has nothing for
+              # Wrangler to bundle, so a `build.command` in `wrangler.config.ts` would never run: the
+              # build is a step of its own, and `cf deploy` uploads `dist` as it stands.
+              run: bun run deploy
+              env:
+                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+                  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+                  CF_SEND_TELEMETRY: "false"
+
+            - name: Verify the deployment
+              # The acceptance checks only the live host can answer: the served policy and the style
+              # hash it names, the site's own 404, the absolute og:image and sitemap, the caching
+              # split, and the version the API serves now.
+              run: bun run live-check
