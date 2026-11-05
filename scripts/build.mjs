@@ -22,6 +22,8 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { STATUS_CODES } from "node:http";
+import { connect } from "node:http2";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,16 +92,133 @@ export async function fetchDocument(source = DEFAULT_DOCS_URL) {
   return { bytes, version, source };
 }
 
+/** How many times a transient answer is retried before the build gives up. */
+const ATTEMPTS = 3;
+
+/** How long one request may take before it counts as a failure and is retried. */
+const DEADLINE = 20_000;
+
+const pause = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
+
+/**
+ * A response, described so the one line the pipeline prints names what refused it.
+ *
+ * A zone in front of the API refuses with an empty status text, and the product that answered is named
+ * only in `cf-mitigated` and in the title of the HTML body. The protocol belongs here too: the API
+ * accepts HTTP/2 and refuses HTTP/1.1, so "answered 403" over `http/1.1` and over `h2` are different
+ * failures with different fixes.
+ */
+function describe(response) {
+  const hints = ["cf-mitigated", "cf-ray", "server", "retry-after"]
+    .map((name) => [name, response.headers.get(name)])
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}: ${value}`);
+  const text = response.body.toString("utf8");
+  const title = text.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim() ?? text.trim().slice(0, 80);
+  return [
+    `${response.status} ${response.statusText}`.trim(),
+    `over ${response.protocol}`,
+    hints.join(", "),
+    title ? `"${title}"` : "",
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+/**
+ * The document, over the protocol the endpoint accepts.
+ *
+ * The API's zone refuses HTTP/1.1 outright — `curl --http1.1` answers `403 Attention Required` where
+ * `--http2` answers the document — and `node:https` speaks HTTP/1.1 by default. The build therefore
+ * asks for HTTP/2 explicitly instead of relying on what a client negotiates today, and every refusal
+ * names the protocol it was made over.
+ *
+ * A rate limit or a server fault is retried with backoff, because a build that fails on a hiccup costs
+ * a release. A refusal is not: `403` is a decision about this client, and asking again changes nothing.
+ */
 async function download(source) {
+  const url = new URL(source);
+  let last;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+    try {
+      const response = url.protocol === "https:" ? await overHttp2(url) : await overHttp1(source);
+      if (response.ok) return response.body;
+      const described = `${source} answered ${describe(response)}`;
+      if (response.status !== 429 && response.status < 500) throw new BuildError(described);
+      last = described;
+    } catch (error) {
+      if (error instanceof BuildError) throw error;
+      last = `${source} failed: ${error.message}`;
+    }
+    if (attempt < ATTEMPTS) await pause(1000 * attempt);
+  }
+  throw new BuildError(last);
+}
+
+/** A GET over HTTP/1.1, for a plain-http source: a stub in a test, or a document served locally. */
+async function overHttp1(source) {
   const response = await fetch(source, {
-    // `must-revalidate` plus an `ETag` is what the endpoint answers with, so a conditional request
-    // is normal; `no-cache` sends the revalidation this build needs and no stored copy is reused.
+    // `must-revalidate` plus an `ETag` is what the endpoint answers with, so a conditional request is
+    // normal; `no-cache` sends the revalidation this build needs and no stored copy is reused.
     headers: { accept: "application/json", "cache-control": "no-cache" },
   });
-  if (!response.ok) {
-    throw new BuildError(`${source} answered ${response.status} ${response.statusText}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+    body: Buffer.from(await response.arrayBuffer()),
+    protocol: "http/1.1",
+  };
+}
+
+/** A GET over HTTP/2, the protocol the zone in front of the API serves. */
+function overHttp2(url) {
+  return new Promise((resolve, reject) => {
+    const session = connect(url.origin);
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      session.close();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    session.setTimeout(DEADLINE, () => finish(new Error(`no answer within ${DEADLINE / 1000}s`)));
+    session.on("error", (error) => finish(error));
+    const request = session.request({
+      ":method": "GET",
+      ":path": `${url.pathname}${url.search}`,
+      accept: "application/json",
+      "cache-control": "no-cache",
+    });
+    const chunks = [];
+    let status = 0;
+    let headers = new Headers();
+    request.on("response", (received) => {
+      status = received[":status"] ?? 0;
+      headers = new Headers(
+        Object.entries(received)
+          .filter(([name]) => !name.startsWith(":"))
+          .map(([name, value]) => [name, String(value)]),
+      );
+    });
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      if (!status) return finish(new Error("the connection closed before a status arrived"));
+      finish(null, {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: STATUS_CODES[status] ?? "",
+        headers,
+        body: Buffer.concat(chunks),
+        protocol: "h2",
+      });
+      return undefined;
+    });
+    request.on("error", (error) => finish(error));
+    request.end();
+  });
 }
 
 /** The version the document declares, or a failure naming what is wrong with it. */

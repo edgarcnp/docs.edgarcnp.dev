@@ -314,6 +314,10 @@ async function main() {
     const html = (await tree(join(SCRATCH, "probe"))).get("index.html")?.toString("utf8") ?? "";
     assert(html.includes(marker), `the page does not carry the added operation (build read ${grown.version})`);
     assert(!page.includes(marker), "the unmodified build already carries the marker");
+    // The build writes the document it read into `public/docs.json`, and the probe is not the one the
+    // site describes: put the real bytes back, so nothing that reads that file afterwards — `bun run
+    // serve`, the dev server — picks up a page with an operation the API does not serve.
+    await writeFile(join(ROOT, "public", "docs.json"), document.bytes);
     return "/__check/probe rendered";
   });
 
