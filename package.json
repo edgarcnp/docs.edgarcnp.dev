@@ -15,7 +15,7 @@
     },
     "devDependencies": {
         "cf": "1.0.0-beta.28",
-        "sourcey": "3.9.4",
+        "sourcey": "3.9.5",
         "wrangler": "4.158.0"
     }
 }
