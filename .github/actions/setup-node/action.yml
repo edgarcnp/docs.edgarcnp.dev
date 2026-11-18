@@ -15,7 +15,7 @@ runs:
           # the Node this names, on the workstation and in CI alike.
           uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
           with:
-              node-version: '26.13.0'
+              node-version: '26.13.1'
               # The lockfile belongs to Bun and `setup-js` owns the install, so there is no npm
               # cache to key. Off explicitly rather than by the action's default, which would start
               # caching the day `packageManager` named npm.
